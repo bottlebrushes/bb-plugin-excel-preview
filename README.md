@@ -1,4 +1,4 @@
-# bb-plugin-sheet-preview
+# bb-plugin-excel-preview
 
 Read-only spreadsheet viewer for BB's file panel. Opening an `.xlsx`, `.xlsm`,
 `.xlsb`, `.xls`, or `.ods` file shows a grid with sheet tabs instead of
@@ -39,12 +39,14 @@ plugin may claim spreadsheet extensions first. A content script
 (the browser-local `bb.fileOpenerByExtension` key):
 
 - It runs once per browser and pins `xlsx`, `xlsm`, `xlsb`, `xls`, and `ods`
-  to Sheet Preview only where that extension has no choice yet, then writes
-  the marker `bb-plugin:sheet-preview:default-opener-seeded:v1`.
+  to Excel Preview only where that extension has no choice yet, then writes
+  the marker `bb-plugin:excel-preview:default-opener-seeded:v1`.
 - An existing choice is never overridden. Picking **Automatic** later removes
   the pin, and the marker keeps the script from re-adding it.
 - After uninstalling, the pin points to a missing opener and BB falls back to
   its built-in preview; choose Automatic under Settings → File openers to undo.
+- A pin left by the plugin's earlier id, `sheet-preview`, counts as no
+  choice and is re-pointed to Excel Preview.
 
 A file already open in a panel tab keeps the viewer it was opened with; close
 and reopen it after installing.

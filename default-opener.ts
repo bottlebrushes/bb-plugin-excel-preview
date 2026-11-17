@@ -1,14 +1,14 @@
-// Makes the spreadsheet viewer the default opener for spreadsheet extensions
-// on first use, without ever overriding a choice the user made.
+// Makes Excel Preview the default opener for spreadsheet extensions on first
+// use, without ever overriding a choice the user made.
 //
 // bb has no registration option for a default opener: with no per-extension
-// pin it uses the first matching opener in plugin-id order, and the file
-// manager's "Preview + location" opener claims xlsx/xls/ods ahead of this one.
-// The pin bb reads is the browser-local preference behind Settings → File
-// openers (`bb.fileOpenerByExtension`). On its first mount in a browser this
-// script pins each spreadsheet extension that has no pin yet, then records
-// that it did so and never touches the preference again — so a later
-// "Automatic" (which removes the pin) or "Built-in preview" sticks.
+// pin it uses the first matching opener in plugin-id order, so any plugin
+// whose id sorts first and claims spreadsheet extensions would win. The pin
+// bb reads is the browser-local preference behind Settings → File openers
+// (`bb.fileOpenerByExtension`). On its first mount in a browser this script
+// pins each spreadsheet extension that has no pin yet, then records that it
+// did so and never touches the preference again — so a later "Automatic"
+// (which removes the pin) or "Built-in preview" sticks.
 // Same scheme as the live-markdown plugin's default-opener.ts.
 
 /** The preference map BB's Settings → File openers reads and writes. */
@@ -17,6 +17,14 @@ const PREFERENCE_KEY = "bb.fileOpenerByExtension";
 export const SPREADSHEET_EXTENSIONS = ["xlsx", "xlsm", "xlsb", "xls", "ods"] as const;
 
 export const OPENER_ID = "spreadsheet";
+
+/**
+ * This plugin was published as `sheet-preview` before it was renamed. A pin to
+ * that id now names a missing opener, which bb resolves to its built-in
+ * preview, so it counts as unpinned and is re-pointed here.
+ */
+const PRE_RENAME_OPENER_REF = `sheet-preview:${OPENER_ID}`;
+const PRE_RENAME_MARKER_KEY = "bb-plugin:sheet-preview:default-opener-seeded:v1";
 
 /** Pins every unpinned spreadsheet extension once per browser, and records that it ran. */
 export function seedDefaultOpener(pluginId: string, storage: Storage = window.localStorage): void {
@@ -37,7 +45,10 @@ export function seedDefaultOpener(pluginId: string, storage: Storage = window.lo
     preference = parsed as Record<string, string>;
   }
 
-  const seeded = SPREADSHEET_EXTENSIONS.filter((extension) => preference[extension] === undefined);
+  const seeded = SPREADSHEET_EXTENSIONS.filter(
+    (extension) =>
+      preference[extension] === undefined || preference[extension] === PRE_RENAME_OPENER_REF,
+  );
   if (seeded.length > 0) {
     const next = { ...preference };
     for (const extension of seeded) next[extension] = `${pluginId}:${OPENER_ID}`;
@@ -50,4 +61,5 @@ export function seedDefaultOpener(pluginId: string, storage: Storage = window.lo
     );
   }
   storage.setItem(markerKey, JSON.stringify({ seeded, at: new Date().toISOString() }));
+  storage.removeItem(PRE_RENAME_MARKER_KEY);
 }

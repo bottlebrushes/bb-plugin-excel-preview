@@ -13,7 +13,7 @@ Opens `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, and `.ods`. Each sheet shows its first 
 
 ## Default opener
 
-On install, Sheet Preview becomes the opener for those five extensions in each browser, the first time BB loads there, for any of them you have not already assigned. It never replaces a choice you made. Change it under Settings → File openers, or right-click a file link and pick Open with.
+On install, Excel Preview becomes the opener for those five extensions in each browser, the first time BB loads there, for any of them you have not already assigned. It never replaces a choice you made. Change it under Settings → File openers, or right-click a file link and pick Open with.
 
 ## Requirements
 

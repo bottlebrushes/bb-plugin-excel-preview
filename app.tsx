@@ -341,7 +341,7 @@ function SpreadsheetViewer({ path, source, Original }: PluginFileOpenerProps) {
 export default definePluginApp((app) => {
   app.slots.fileOpener({
     id: OPENER_ID,
-    title: "Spreadsheet viewer",
+    title: "Excel Preview",
     extensions: SPREADSHEET_EXTENSIONS,
     component: SpreadsheetViewer,
   });
