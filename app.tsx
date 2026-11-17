@@ -31,39 +31,63 @@ const CELL_CLASS: Record<CellKind, string> = {
   formula: "italic text-muted-foreground",
 };
 
-/** Spreadsheet-style name of the frozen range, e.g. "column A" or "columns A–C". */
-function frozenRangeLabel(grid: SheetGrid, count: number): string {
+/** Rows and columns pinned at the top and left edges, counted over the grid. */
+interface FrozenPanes {
+  rows: number;
+  cols: number;
+}
+
+/** What a right-click landed on: a cell, a row number, or a column letter. */
+interface MenuTarget {
+  row: number | null;
+  col: number | null;
+}
+
+const FROZEN_EDGE_RIGHT = "border-r-2 border-r-muted-foreground/50";
+const FROZEN_EDGE_BOTTOM = "border-b-2 border-b-muted-foreground/50";
+
+/** Spreadsheet-style name of the first `count` columns, e.g. "columns A–C". */
+function columnRangeLabel(grid: SheetGrid, count: number): string {
   const first = grid.columns[0].label;
   const last = grid.columns[count - 1].label;
   return count === 1 ? `column ${first}` : `columns ${first}–${last}`;
 }
 
+/** Name of the first `count` visible rows by their sheet numbers, e.g. "rows 1–5". */
+function rowRangeLabel(grid: SheetGrid, count: number): string {
+  const first = grid.rows[0].number;
+  const last = grid.rows[count - 1].number;
+  return count === 1 ? `row ${first}` : `rows ${first}–${last}`;
+}
+
 /**
- * Left offsets (px) of the first `frozen` columns, measured from the header row
- * so they track the auto-sized column widths. Empty until measured.
+ * Sticky offsets (px) of the first `count` columns or rows: the size of `lead`
+ * (the header corner) plus the sizes of the items before each one. Measured
+ * from the DOM so they track auto-sized widths and heights; empty until measured.
  */
-function useFrozenOffsets(
-  frozen: number,
+function useStickyOffsets(
+  count: number,
+  axis: "width" | "height",
   grid: SheetGrid,
   tableRef: RefObject<HTMLTableElement | null>,
-  cornerRef: RefObject<HTMLTableCellElement | null>,
-  headerRefs: RefObject<(HTMLTableCellElement | null)[]>,
+  leadRef: RefObject<Element | null>,
+  itemRefs: RefObject<(Element | null)[]>,
 ): number[] {
   const [offsets, setOffsets] = useState<number[]>([]);
   useLayoutEffect(() => {
     const table = tableRef.current;
-    const corner = cornerRef.current;
-    if (frozen === 0 || table === null || corner === null) {
+    const lead = leadRef.current;
+    if (count === 0 || table === null || lead === null) {
       setOffsets([]);
       return;
     }
     const measure = () => {
       const next: number[] = [];
-      // Sub-pixel widths: rounding each one would drift the later offsets.
-      let left = corner.getBoundingClientRect().width;
-      for (let index = 0; index < frozen; index += 1) {
-        next.push(left);
-        left += headerRefs.current[index]?.getBoundingClientRect().width ?? 0;
+      // Sub-pixel sizes: rounding each one would drift the later offsets.
+      let offset = lead.getBoundingClientRect()[axis];
+      for (let index = 0; index < count; index += 1) {
+        next.push(offset);
+        offset += itemRefs.current[index]?.getBoundingClientRect()[axis] ?? 0;
       }
       setOffsets((previous) =>
         previous.length === next.length && previous.every((value, index) => value === next[index])
@@ -75,8 +99,65 @@ function useFrozenOffsets(
     const observer = new ResizeObserver(measure);
     observer.observe(table);
     return () => observer.disconnect();
-  }, [frozen, grid, tableRef, cornerRef, headerRefs]);
+  }, [count, axis, grid, tableRef, leadRef, itemRefs]);
   return offsets;
+}
+
+function FreezeMenuItems({
+  grid,
+  frozen,
+  target,
+  onFreeze,
+}: {
+  grid: SheetGrid;
+  frozen: FrozenPanes;
+  target: MenuTarget;
+  onFreeze: (panes: FrozenPanes) => void;
+}) {
+  // Freezing through a row or column includes it, like the column letters.
+  const rows = target.row === null ? null : target.row + 1;
+  const cols = target.col === null ? null : target.col + 1;
+  return (
+    <>
+      {rows !== null && cols !== null && (frozen.rows !== rows || frozen.cols !== cols) ? (
+        <ContextMenuItem onSelect={() => onFreeze({ rows, cols })}>
+          Freeze {rowRangeLabel(grid, rows)} and {columnRangeLabel(grid, cols)}
+        </ContextMenuItem>
+      ) : null}
+      {rows !== null && frozen.rows !== rows ? (
+        <ContextMenuItem onSelect={() => onFreeze({ rows, cols: frozen.cols })}>
+          Freeze {rowRangeLabel(grid, rows)}
+        </ContextMenuItem>
+      ) : null}
+      {cols !== null && frozen.cols !== cols ? (
+        <ContextMenuItem onSelect={() => onFreeze({ rows: frozen.rows, cols })}>
+          Freeze {columnRangeLabel(grid, cols)}
+        </ContextMenuItem>
+      ) : null}
+      {rows !== null && cols !== null ? (
+        <ContextMenuItem
+          disabled={frozen.rows === 0 && frozen.cols === 0}
+          onSelect={() => onFreeze({ rows: 0, cols: 0 })}
+        >
+          Unfreeze rows and columns
+        </ContextMenuItem>
+      ) : rows !== null ? (
+        <ContextMenuItem
+          disabled={frozen.rows === 0}
+          onSelect={() => onFreeze({ rows: 0, cols: frozen.cols })}
+        >
+          Unfreeze rows
+        </ContextMenuItem>
+      ) : (
+        <ContextMenuItem
+          disabled={frozen.cols === 0}
+          onSelect={() => onFreeze({ rows: frozen.rows, cols: 0 })}
+        >
+          Unfreeze columns
+        </ContextMenuItem>
+      )}
+    </>
+  );
 }
 
 function SheetTable({
@@ -85,53 +166,57 @@ function SheetTable({
   onFreeze,
 }: {
   grid: SheetGrid;
-  /** Columns frozen at the left edge, counted over `grid.columns`. */
-  frozen: number;
-  onFreeze: (count: number) => void;
+  frozen: FrozenPanes;
+  onFreeze: (panes: FrozenPanes) => void;
 }) {
   const tableRef = useRef<HTMLTableElement>(null);
   const cornerRef = useRef<HTMLTableCellElement>(null);
   const headerRefs = useRef<(HTMLTableCellElement | null)[]>([]);
-  const offsets = useFrozenOffsets(frozen, grid, tableRef, cornerRef, headerRefs);
-  // The column whose header was right-clicked; the menu acts on it.
-  const [menuColumn, setMenuColumn] = useState(0);
+  const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const leftOffsets = useStickyOffsets(frozen.cols, "width", grid, tableRef, cornerRef, headerRefs);
+  const topOffsets = useStickyOffsets(frozen.rows, "height", grid, tableRef, cornerRef, rowRefs);
+  const [menuTarget, setMenuTarget] = useState<MenuTarget>({ row: null, col: 0 });
 
   // A cell sticks only when its whole span sits inside the frozen range, so a
-  // merge that crosses the boundary scrolls instead of covering other columns.
-  const stickyLeft = (index: number, colSpan: number): number | undefined =>
-    index + colSpan <= frozen ? offsets[index] : undefined;
+  // merge that crosses the edge scrolls instead of covering other cells.
+  const stickyLeft = (col: number, colSpan: number): number | undefined =>
+    col + colSpan <= frozen.cols ? leftOffsets[col] : undefined;
+  const stickyTop = (row: number, rowSpan: number): number | undefined =>
+    row + rowSpan <= frozen.rows ? topOffsets[row] : undefined;
 
+  // Layering, low to high: cells frozen on one axis pass beneath cells frozen
+  // on both, and every body cell passes beneath the header row.
   return (
-    <table
-      ref={tableRef}
-      className="border-separate border-spacing-0 font-mono text-xs text-foreground"
-    >
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <table
+          ref={tableRef}
+          className="border-separate border-spacing-0 font-mono text-xs text-foreground"
+        >
           <thead>
             <tr>
               <th
                 ref={cornerRef}
                 aria-hidden="true"
-                // The corner has no column to act on: keep the browser's own menu.
+                // The corner has nothing to freeze: keep the browser's own menu.
                 onContextMenu={(event) => event.stopPropagation()}
-                className="sticky left-0 top-0 z-40 border-b border-r border-border bg-card"
+                className="sticky left-0 top-0 z-50 border-b border-r border-border bg-card"
               />
-              {grid.columns.map((column, index) => {
-                const left = stickyLeft(index, 1);
+              {grid.columns.map((column, col) => {
+                const left = stickyLeft(col, 1);
                 return (
                   <th
                     key={column.label}
                     ref={(element) => {
-                      headerRefs.current[index] = element;
+                      headerRefs.current[col] = element;
                     }}
                     scope="col"
-                    onContextMenu={() => setMenuColumn(index)}
+                    onContextMenu={() => setMenuTarget({ row: null, col })}
                     style={left === undefined ? undefined : { left }}
                     className={cn(
                       "sticky top-0 border-b border-r border-border bg-card px-2 py-1 text-center font-normal text-muted-foreground",
-                      left === undefined ? "z-20" : "z-30",
-                      index + 1 === frozen && "border-r-2 border-r-muted-foreground/50",
+                      left === undefined ? "z-30" : "z-40",
+                      col + 1 === frozen.cols && FROZEN_EDGE_RIGHT,
                     )}
                   >
                     {column.label}
@@ -140,72 +225,92 @@ function SheetTable({
               })}
             </tr>
           </thead>
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          {frozen === menuColumn + 1 ? null : (
-            <ContextMenuItem onSelect={() => onFreeze(menuColumn + 1)}>
-              Freeze {frozenRangeLabel(grid, menuColumn + 1)}
-            </ContextMenuItem>
-          )}
-          <ContextMenuItem disabled={frozen === 0} onSelect={() => onFreeze(0)}>
-            Unfreeze columns
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      <tbody>
-        {grid.rows.map((row) => (
-          <tr key={row.number} className="group">
-            <th
-              scope="row"
-              className="sticky left-0 z-10 border-b border-r border-border bg-card px-2 text-right font-normal tabular-nums text-muted-foreground"
-            >
-              {row.number}
-            </th>
-            {row.cells.map((cell, index) => {
-              if (cell === null) return null;
-              const left = stickyLeft(index, cell.colSpan);
+          <tbody>
+            {grid.rows.map((gridRow, row) => {
+              const rowTop = stickyTop(row, 1);
               return (
-                <td
-                  key={grid.columns[index].label}
-                  rowSpan={cell.rowSpan}
-                  colSpan={cell.colSpan}
-                  title={cell.title}
-                  style={left === undefined ? undefined : { left }}
-                  className={cn(
-                    "border-b border-r border-border px-2 py-1 align-top",
-                    // Frozen cells stay opaque so scrolled cells pass beneath
-                    // them; the hover tint is layered on top as an image.
-                    left === undefined
-                      ? "group-hover:bg-state-hover"
-                      : "sticky z-10 bg-background group-hover:bg-linear-to-r group-hover:from-state-hover group-hover:to-state-hover",
-                    index + cell.colSpan === frozen && "border-r-2 border-r-muted-foreground/50",
-                    CELL_CLASS[cell.kind],
-                  )}
+                <tr
+                  key={gridRow.number}
+                  ref={(element) => {
+                    rowRefs.current[row] = element;
+                  }}
+                  className="group"
                 >
-                  <div
-                    className="max-w-[28rem] truncate"
-                    style={{ minWidth: cell.colSpan === 1 ? grid.columns[index].widthPx : undefined }}
+                  <th
+                    scope="row"
+                    onContextMenu={() => setMenuTarget({ row, col: null })}
+                    style={rowTop === undefined ? undefined : { top: rowTop }}
+                    className={cn(
+                      "sticky left-0 border-b border-r border-border bg-card px-2 text-right font-normal tabular-nums text-muted-foreground",
+                      rowTop === undefined ? "z-10" : "z-30",
+                      row + 1 === frozen.rows && FROZEN_EDGE_BOTTOM,
+                    )}
                   >
-                    {cell.text}
-                  </div>
-                </td>
+                    {gridRow.number}
+                  </th>
+                  {gridRow.cells.map((cell, col) => {
+                    if (cell === null) return null;
+                    const left = stickyLeft(col, cell.colSpan);
+                    const top = stickyTop(row, cell.rowSpan);
+                    const sticky = left !== undefined || top !== undefined;
+                    return (
+                      <td
+                        key={grid.columns[col].label}
+                        rowSpan={cell.rowSpan}
+                        colSpan={cell.colSpan}
+                        title={cell.title}
+                        onContextMenu={() => setMenuTarget({ row, col })}
+                        style={sticky ? { left, top } : undefined}
+                        className={cn(
+                          "border-b border-r border-border px-2 py-1 align-top",
+                          // Frozen cells stay opaque so scrolled cells pass beneath
+                          // them; the hover tint is layered on top as an image.
+                          sticky
+                            ? "sticky bg-background group-hover:bg-linear-to-r group-hover:from-state-hover group-hover:to-state-hover"
+                            : "group-hover:bg-state-hover",
+                          left !== undefined && top !== undefined
+                            ? "z-30"
+                            : top !== undefined
+                              ? "z-20"
+                              : left !== undefined && "z-10",
+                          col + cell.colSpan === frozen.cols && FROZEN_EDGE_RIGHT,
+                          row + cell.rowSpan === frozen.rows && FROZEN_EDGE_BOTTOM,
+                          CELL_CLASS[cell.kind],
+                        )}
+                      >
+                        <div
+                          className="max-w-[28rem] truncate"
+                          style={{ minWidth: cell.colSpan === 1 ? grid.columns[col].widthPx : undefined }}
+                        >
+                          {cell.text}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
               );
             })}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+          </tbody>
+        </table>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <FreezeMenuItems grid={grid} frozen={frozen} target={menuTarget} onFreeze={onFreeze} />
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
 function WorkbookView({ workbook, tabs }: { workbook: WorkBook; tabs: SheetTab[] }) {
   const [selectedName, setSelectedName] = useState(tabs[0].name);
-  // Frozen column count per sheet, kept while the file stays open.
-  const [frozenBySheet, setFrozenBySheet] = useState<Record<string, number>>({});
+  // Frozen rows and columns per sheet, kept while the file stays open.
+  const [frozenBySheet, setFrozenBySheet] = useState<Record<string, FrozenPanes>>({});
   // A reload or another file can drop the selected sheet; fall back to the first.
   const activeName = tabs.some((tab) => tab.name === selectedName) ? selectedName : tabs[0].name;
   const grid = useMemo(() => buildGrid(workbook.Sheets[activeName]), [workbook, activeName]);
-  const frozen = Math.min(frozenBySheet[activeName] ?? 0, grid.columns.length);
+  const frozen: FrozenPanes = {
+    rows: Math.min(frozenBySheet[activeName]?.rows ?? 0, grid.rows.length),
+    cols: Math.min(frozenBySheet[activeName]?.cols ?? 0, grid.columns.length),
+  };
   const notes: string[] = [];
   if (grid.totalRows > grid.shownRows) {
     notes.push(`first ${grid.shownRows.toLocaleString()} of ${grid.totalRows.toLocaleString()} rows`);
@@ -230,7 +335,7 @@ function WorkbookView({ workbook, tabs }: { workbook: WorkBook; tabs: SheetTab[]
           <SheetTable
             grid={grid}
             frozen={frozen}
-            onFreeze={(count) => setFrozenBySheet((previous) => ({ ...previous, [activeName]: count }))}
+            onFreeze={(panes) => setFrozenBySheet((previous) => ({ ...previous, [activeName]: panes }))}
           />
         )}
       </div>
