@@ -26,6 +26,7 @@
     "load.ts",
     "sheet.ts",
     "default-opener.ts",
+    "components",
     "lib"
   ]
 }

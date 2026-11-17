@@ -13,6 +13,10 @@ follows the active palette and light/dark mode without a reload.
   Numbers are right-aligned, errors use the theme's destructive color.
 - Merged cells, column widths from the file, hidden rows and columns.
 - Hover a cell for its formula and any cell note.
+- Right-click a column letter to freeze every column up to and including it,
+  or to unfreeze. Each sheet keeps its own frozen columns while the file is
+  open. A merged cell that crosses the frozen edge scrolls with the unfrozen
+  columns.
 - A formula with no saved result (a file written by a script and never opened
   in Excel) shows its formula text in muted italics instead of a blank cell.
 
