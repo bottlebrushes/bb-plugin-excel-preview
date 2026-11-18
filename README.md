@@ -15,11 +15,14 @@ be edited.
   Numbers are right-aligned, errors use the theme's destructive color.
 - Merged cells, column widths from the file, hidden rows and columns.
 - Hover a cell for its formula and any cell note.
-- Freeze panes from the right-click menu. On a cell: freeze the rows and
-  columns up to and including it, or just its rows or columns. On a row number
-  or column letter: freeze the rows or columns up to it. Each menu also
-  unfreezes. Each sheet keeps its own frozen panes while the file is open. A
-  merged cell that crosses a frozen edge scrolls with the unfrozen cells.
+- Freeze panes from the right-click menu (a long-press on touch screens). On a
+  cell: freeze the rows and columns up to and including it, or just its rows
+  or columns. On a row number or column letter: freeze the rows or columns up
+  to it. Every menu can also freeze only that one row or column: it scrolls
+  until it reaches the edge, then stays there while the ones before it scroll
+  away. Each menu also unfreezes. Each sheet keeps its own frozen panes while
+  the file is open. A merged cell that crosses a frozen edge scrolls with the
+  unfrozen cells.
 - A formula with no saved result (a file written by a script and never opened
   in Excel) is recalculated by LibreOffice and shows its result; a footer says
   so. The file itself is not changed. Without LibreOffice the cell shows its

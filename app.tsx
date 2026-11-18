@@ -49,10 +49,22 @@ const CELL_CLASS: Record<CellKind, string> = {
   formula: "italic text-muted-foreground",
 };
 
-/** Rows and columns pinned at the top and left edges, counted over the grid. */
+/** A run of grid rows or columns, `start` inclusive and `end` exclusive; empty when they are equal. */
+interface Span {
+  start: number;
+  end: number;
+}
+
+const NO_SPAN: Span = { start: 0, end: 0 };
+
+/**
+ * Rows and columns pinned to the top and left edges, as indices into the grid.
+ * A run that does not start at the first row or column scrolls normally until
+ * it reaches the edge, then stays there while the ones before it scroll away.
+ */
 interface FrozenPanes {
-  rows: number;
-  cols: number;
+  rows: Span;
+  cols: Span;
 }
 
 /** What a right-click landed on: a cell, a row number, or a column letter. */
@@ -64,27 +76,28 @@ interface MenuTarget {
 const FROZEN_EDGE_RIGHT = "border-r-2 border-r-muted-foreground/50";
 const FROZEN_EDGE_BOTTOM = "border-b-2 border-b-muted-foreground/50";
 
-/** Spreadsheet-style name of the first `count` columns, e.g. "columns A–C". */
-function columnRangeLabel(grid: SheetGrid, count: number): string {
-  const first = grid.columns[0].label;
-  const last = grid.columns[count - 1].label;
-  return count === 1 ? `column ${first}` : `columns ${first}–${last}`;
+/** Spreadsheet-style name of a run of columns, e.g. "column C" or "columns A–C". */
+function columnRangeLabel(grid: SheetGrid, span: Span): string {
+  const first = grid.columns[span.start].label;
+  const last = grid.columns[span.end - 1].label;
+  return span.end - span.start === 1 ? `column ${first}` : `columns ${first}–${last}`;
 }
 
-/** Name of the first `count` visible rows by their sheet numbers, e.g. "rows 1–5". */
-function rowRangeLabel(grid: SheetGrid, count: number): string {
-  const first = grid.rows[0].number;
-  const last = grid.rows[count - 1].number;
-  return count === 1 ? `row ${first}` : `rows ${first}–${last}`;
+/** Name of a run of visible rows by their sheet numbers, e.g. "row 4" or "rows 1–5". */
+function rowRangeLabel(grid: SheetGrid, span: Span): string {
+  const first = grid.rows[span.start].number;
+  const last = grid.rows[span.end - 1].number;
+  return span.end - span.start === 1 ? `row ${first}` : `rows ${first}–${last}`;
 }
 
 /**
- * Sticky offsets (px) of the first `count` columns or rows: the size of `lead`
- * (the header corner) plus the sizes of the items before each one. Measured
- * from the DOM so they track auto-sized widths and heights; empty until measured.
+ * Sticky offsets (px) of the columns or rows in `span`, indexed from its start:
+ * the size of `lead` (the header corner) plus the sizes of the span's items
+ * before each one. Measured from the DOM so they track auto-sized widths and
+ * heights; empty until measured.
  */
 function useStickyOffsets(
-  count: number,
+  span: Span,
   axis: "width" | "height",
   grid: SheetGrid,
   tableRef: RefObject<HTMLTableElement | null>,
@@ -92,10 +105,11 @@ function useStickyOffsets(
   itemRefs: RefObject<(Element | null)[]>,
 ): number[] {
   const [offsets, setOffsets] = useState<number[]>([]);
+  const { start, end } = span;
   useLayoutEffect(() => {
     const table = tableRef.current;
     const lead = leadRef.current;
-    if (count === 0 || table === null || lead === null) {
+    if (end <= start || table === null || lead === null) {
       setOffsets([]);
       return;
     }
@@ -103,7 +117,7 @@ function useStickyOffsets(
       const next: number[] = [];
       // Sub-pixel sizes: rounding each one would drift the later offsets.
       let offset = lead.getBoundingClientRect()[axis];
-      for (let index = 0; index < count; index += 1) {
+      for (let index = start; index < end; index += 1) {
         next.push(offset);
         offset += itemRefs.current[index]?.getBoundingClientRect()[axis] ?? 0;
       }
@@ -117,7 +131,7 @@ function useStickyOffsets(
     const observer = new ResizeObserver(measure);
     observer.observe(table);
     return () => observer.disconnect();
-  }, [count, axis, grid, tableRef, leadRef, itemRefs]);
+  }, [start, end, axis, grid, tableRef, leadRef, itemRefs]);
   return offsets;
 }
 
@@ -132,45 +146,59 @@ function FreezeMenuItems({
   target: MenuTarget;
   onFreeze: (panes: FrozenPanes) => void;
 }) {
-  // Freezing through a row or column includes it, like the column letters.
-  const rows = target.row === null ? null : target.row + 1;
-  const cols = target.col === null ? null : target.col + 1;
+  // Two choices per axis: everything up to and including the target, or just
+  // the target (the same thing on the first row or column).
+  const rowSpans =
+    target.row === null
+      ? []
+      : [{ start: 0, end: target.row + 1 }, ...(target.row > 0 ? [{ start: target.row, end: target.row + 1 }] : [])];
+  const colSpans =
+    target.col === null
+      ? []
+      : [{ start: 0, end: target.col + 1 }, ...(target.col > 0 ? [{ start: target.col, end: target.col + 1 }] : [])];
+  const choices: { label: string; panes: FrozenPanes }[] = [];
+  if (rowSpans.length > 0 && colSpans.length > 0) {
+    choices.push({
+      label: `Freeze ${rowRangeLabel(grid, rowSpans[0])} and ${columnRangeLabel(grid, colSpans[0])}`,
+      panes: { rows: rowSpans[0], cols: colSpans[0] },
+    });
+  }
+  for (const rows of rowSpans) {
+    choices.push({ label: `Freeze ${rowRangeLabel(grid, rows)}`, panes: { rows, cols: frozen.cols } });
+  }
+  for (const cols of colSpans) {
+    choices.push({ label: `Freeze ${columnRangeLabel(grid, cols)}`, panes: { rows: frozen.rows, cols } });
+  }
+  const rowsFrozen = frozen.rows.end > frozen.rows.start;
+  const colsFrozen = frozen.cols.end > frozen.cols.start;
   return (
     <>
-      {rows !== null && cols !== null && (frozen.rows !== rows || frozen.cols !== cols) ? (
-        <ContextMenuItem onSelect={() => onFreeze({ rows, cols })}>
-          Freeze {rowRangeLabel(grid, rows)} and {columnRangeLabel(grid, cols)}
-        </ContextMenuItem>
-      ) : null}
-      {rows !== null && frozen.rows !== rows ? (
-        <ContextMenuItem onSelect={() => onFreeze({ rows, cols: frozen.cols })}>
-          Freeze {rowRangeLabel(grid, rows)}
-        </ContextMenuItem>
-      ) : null}
-      {cols !== null && frozen.cols !== cols ? (
-        <ContextMenuItem onSelect={() => onFreeze({ rows: frozen.rows, cols })}>
-          Freeze {columnRangeLabel(grid, cols)}
-        </ContextMenuItem>
-      ) : null}
-      {rows !== null && cols !== null ? (
+      {choices
+        .filter(
+          ({ panes }) =>
+            panes.rows.start !== frozen.rows.start ||
+            panes.rows.end !== frozen.rows.end ||
+            panes.cols.start !== frozen.cols.start ||
+            panes.cols.end !== frozen.cols.end,
+        )
+        .map(({ label, panes }) => (
+          <ContextMenuItem key={label} onSelect={() => onFreeze(panes)}>
+            {label}
+          </ContextMenuItem>
+        ))}
+      {rowSpans.length > 0 && colSpans.length > 0 ? (
         <ContextMenuItem
-          disabled={frozen.rows === 0 && frozen.cols === 0}
-          onSelect={() => onFreeze({ rows: 0, cols: 0 })}
+          disabled={!rowsFrozen && !colsFrozen}
+          onSelect={() => onFreeze({ rows: NO_SPAN, cols: NO_SPAN })}
         >
           Unfreeze rows and columns
         </ContextMenuItem>
-      ) : rows !== null ? (
-        <ContextMenuItem
-          disabled={frozen.rows === 0}
-          onSelect={() => onFreeze({ rows: 0, cols: frozen.cols })}
-        >
+      ) : rowSpans.length > 0 ? (
+        <ContextMenuItem disabled={!rowsFrozen} onSelect={() => onFreeze({ rows: NO_SPAN, cols: frozen.cols })}>
           Unfreeze rows
         </ContextMenuItem>
       ) : (
-        <ContextMenuItem
-          disabled={frozen.cols === 0}
-          onSelect={() => onFreeze({ rows: frozen.rows, cols: 0 })}
-        >
+        <ContextMenuItem disabled={!colsFrozen} onSelect={() => onFreeze({ rows: frozen.rows, cols: NO_SPAN })}>
           Unfreeze columns
         </ContextMenuItem>
       )}
@@ -290,9 +318,9 @@ function SheetTable({
   // A cell sticks only when its whole span sits inside the frozen range, so a
   // merge that crosses the edge scrolls instead of covering other cells.
   const stickyLeft = (col: number, colSpan: number): number | undefined =>
-    col + colSpan <= frozen.cols ? leftOffsets[col] : undefined;
+    col >= frozen.cols.start && col + colSpan <= frozen.cols.end ? leftOffsets[col - frozen.cols.start] : undefined;
   const stickyTop = (row: number, rowSpan: number): number | undefined =>
-    row + rowSpan <= frozen.rows ? topOffsets[row] : undefined;
+    row >= frozen.rows.start && row + rowSpan <= frozen.rows.end ? topOffsets[row - frozen.rows.start] : undefined;
 
   // Layering, low to high: cells frozen on one axis pass beneath cells frozen
   // on both, and every body cell passes beneath the header row.
@@ -331,7 +359,7 @@ function SheetTable({
                     className={cn(
                       "sticky top-0 border-b border-r border-border bg-card px-2 py-1 text-center font-normal text-muted-foreground",
                       left === undefined ? "z-30" : "z-40",
-                      col + 1 === frozen.cols && FROZEN_EDGE_RIGHT,
+                      col + 1 === frozen.cols.end && FROZEN_EDGE_RIGHT,
                     )}
                   >
                     {column.label}
@@ -358,7 +386,7 @@ function SheetTable({
                     className={cn(
                       "sticky left-0 border-b border-r border-border bg-card px-2 text-right font-normal tabular-nums text-muted-foreground",
                       rowTop === undefined ? "z-10" : "z-30",
-                      row + 1 === frozen.rows && FROZEN_EDGE_BOTTOM,
+                      row + 1 === frozen.rows.end && FROZEN_EDGE_BOTTOM,
                     )}
                   >
                     {gridRow.number}
@@ -394,8 +422,8 @@ function SheetTable({
                             : top !== undefined
                               ? "z-20"
                               : left !== undefined && "z-10",
-                          col + cell.colSpan === frozen.cols && FROZEN_EDGE_RIGHT,
-                          row + cell.rowSpan === frozen.rows && FROZEN_EDGE_BOTTOM,
+                          col + cell.colSpan === frozen.cols.end && FROZEN_EDGE_RIGHT,
+                          row + cell.rowSpan === frozen.rows.end && FROZEN_EDGE_BOTTOM,
                           CELL_CLASS[cell.kind],
                           isSelected && "outline-2 -outline-offset-2 outline-ring",
                           editing?.saving === cell.address && "animate-pulse",
@@ -469,9 +497,14 @@ function WorkbookView({
   // A reload or another file can drop the selected sheet; fall back to the first.
   const activeName = tabs.some((tab) => tab.name === selectedName) ? selectedName : tabs[0].name;
   const grid = useMemo(() => buildGrid(workbook.Sheets[activeName]), [workbook, activeName]);
+  // Another version of the file can have fewer rows or columns: trim to fit.
+  const fit = (span: Span | undefined, length: number): Span =>
+    span === undefined || span.start >= Math.min(span.end, length)
+      ? NO_SPAN
+      : { start: span.start, end: Math.min(span.end, length) };
   const frozen: FrozenPanes = {
-    rows: Math.min(frozenBySheet[activeName]?.rows ?? 0, grid.rows.length),
-    cols: Math.min(frozenBySheet[activeName]?.cols ?? 0, grid.columns.length),
+    rows: fit(frozenBySheet[activeName]?.rows, grid.rows.length),
+    cols: fit(frozenBySheet[activeName]?.cols, grid.columns.length),
   };
   const notes: string[] = [];
   if (grid.totalRows > grid.shownRows) {
