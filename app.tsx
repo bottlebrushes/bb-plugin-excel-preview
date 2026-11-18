@@ -204,6 +204,12 @@ function SheetTable({
   const leftOffsets = useStickyOffsets(frozen.cols, "width", grid, tableRef, cornerRef, headerRefs);
   const topOffsets = useStickyOffsets(frozen.rows, "height", grid, tableRef, cornerRef, rowRefs);
   const [menuTarget, setMenuTarget] = useState<MenuTarget>({ row: null, col: 0 });
+  // A touch long-press opens the menu without a `contextmenu` event (iOS never
+  // sends one), so the press itself records what the menu is for.
+  const menuTargetHandlers = (target: MenuTarget) => ({
+    onPointerDown: () => setMenuTarget(target),
+    onContextMenu: () => setMenuTarget(target),
+  });
   const [selected, setSelected] = useState<CellPosition | null>(null);
   const [draft, setDraft] = useState<{ position: CellPosition; value: string } | null>(null);
   // Enter and blur both finish an edit; the ref lets only the first one commit.
@@ -305,8 +311,10 @@ function SheetTable({
               <th
                 ref={cornerRef}
                 aria-hidden="true"
-                // The corner has nothing to freeze: keep the browser's own menu.
+                // The corner has nothing to freeze: keep the browser's own menu
+                // and keep a touch long-press from opening ours.
                 onContextMenu={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
                 className="sticky left-0 top-0 z-50 border-b border-r border-border bg-card"
               />
               {grid.columns.map((column, col) => {
@@ -318,7 +326,7 @@ function SheetTable({
                       headerRefs.current[col] = element;
                     }}
                     scope="col"
-                    onContextMenu={() => setMenuTarget({ row: null, col })}
+                    {...menuTargetHandlers({ row: null, col })}
                     style={left === undefined ? undefined : { left }}
                     className={cn(
                       "sticky top-0 border-b border-r border-border bg-card px-2 py-1 text-center font-normal text-muted-foreground",
@@ -345,7 +353,7 @@ function SheetTable({
                 >
                   <th
                     scope="row"
-                    onContextMenu={() => setMenuTarget({ row, col: null })}
+                    {...menuTargetHandlers({ row, col: null })}
                     style={rowTop === undefined ? undefined : { top: rowTop }}
                     className={cn(
                       "sticky left-0 border-b border-r border-border bg-card px-2 text-right font-normal tabular-nums text-muted-foreground",
@@ -372,7 +380,7 @@ function SheetTable({
                         aria-selected={isSelected}
                         onClick={() => setSelected({ row, col })}
                         onDoubleClick={() => startEditing({ row, col }, cell.input)}
-                        onContextMenu={() => setMenuTarget({ row, col })}
+                        {...menuTargetHandlers({ row, col })}
                         style={sticky ? { left, top } : undefined}
                         className={cn(
                           "border-b border-r border-border px-2 py-1 align-top",
