@@ -1,6 +1,6 @@
 // Workbook parsing and the grid model the viewer renders. Pure (no DOM, no
 // React) so it runs the same in the browser bundle and in Node smoke checks.
-import { read, utils } from "xlsx";
+import { SSF, read, utils } from "xlsx";
 import type { CellObject, WorkBook, WorkSheet } from "xlsx";
 
 /** Rows parsed per sheet; the rest stay in the file and are counted from `!fullref`. */
@@ -15,8 +15,12 @@ const MAX_COLUMN_PX = 448;
 export type CellKind = "empty" | "text" | "number" | "bool" | "error" | "formula";
 
 export interface GridCell {
+  /** A1 address in the sheet, e.g. "B5". */
+  address: string;
   /** Display text: Excel's formatted value, or `=FORMULA` when no result was saved. */
   text: string;
+  /** What editing the cell starts from: its formula, or its value as one would type it. */
+  input: string;
   kind: CellKind;
   /** Hover text: the formula and any cell note. */
   title: string | undefined;
@@ -51,8 +55,8 @@ export interface SheetTab {
   name: string;
 }
 
-export function parseWorkbook(bytes: ArrayBuffer): WorkBook {
-  return read(new Uint8Array(bytes), {
+export function parseWorkbook(bytes: Uint8Array): WorkBook {
+  return read(bytes, {
     type: "array",
     dense: true,
     cellFormula: true,
@@ -91,17 +95,52 @@ function cellTitle(cell: CellObject): string | undefined {
   return parts.length > 0 ? parts.join("\n") : undefined;
 }
 
-function toGridCell(cell: CellObject | undefined): GridCell {
+/** A formula written by a script and never recalculated has no saved result. */
+function lacksResult(cell: CellObject): boolean {
+  return cell.f !== undefined && (cell.v === undefined || cell.t === "z");
+}
+
+/** True when some formula in the workbook has no saved result to show. */
+export function needsRecalculation(workbook: WorkBook): boolean {
+  return workbook.SheetNames.some((name) =>
+    (workbook.Sheets[name]["!data"] ?? []).some((row) => row?.some((cell) => cell !== undefined && lacksResult(cell))),
+  );
+}
+
+/** The cell as one would type it into Excel: percentages and dates as shown, other numbers unrounded. */
+function cellInput(cell: CellObject): string {
+  if (cell.f !== undefined) return `=${cell.f}`;
+  switch (cell.t) {
+    case "b":
+      return cell.v ? "TRUE" : "FALSE";
+    case "n": {
+      const value = cell.v as number;
+      if (typeof cell.z === "string" && SSF.is_date(cell.z)) return cell.w ?? String(value);
+      if (typeof cell.z === "string" && cell.z.includes("%")) return `${Number((value * 100).toPrecision(15))}%`;
+      return String(value);
+    }
+    case "d":
+    case "e":
+      return cell.w ?? "";
+    case "z":
+      return "";
+    default:
+      return cell.v === undefined ? "" : String(cell.v);
+  }
+}
+
+function toGridCell(address: string, cell: CellObject | undefined): GridCell {
+  const blank = { address, input: "", rowSpan: 1, colSpan: 1 };
   if (cell === undefined) {
-    return { text: "", kind: "empty", title: undefined, rowSpan: 1, colSpan: 1 };
+    return { ...blank, text: "", kind: "empty", title: undefined };
   }
   const title = cellTitle(cell);
-  // A formula written by a script and never recalculated has no saved result.
-  if (cell.f !== undefined && (cell.v === undefined || cell.t === "z")) {
-    return { text: `=${cell.f}`, kind: "formula", title, rowSpan: 1, colSpan: 1 };
+  const input = cellInput(cell);
+  if (lacksResult(cell)) {
+    return { ...blank, input, text: `=${cell.f}`, kind: "formula", title };
   }
   if (cell.t === "z") {
-    return { text: "", kind: "empty", title, rowSpan: 1, colSpan: 1 };
+    return { ...blank, text: "", kind: "empty", title };
   }
   const kind: CellKind =
     cell.t === "n" || cell.t === "d"
@@ -111,7 +150,7 @@ function toGridCell(cell: CellObject | undefined): GridCell {
         : cell.t === "e"
           ? "error"
           : "text";
-  return { text: utils.format_cell(cell), kind, title, rowSpan: 1, colSpan: 1 };
+  return { ...blank, input, text: utils.format_cell(cell), kind, title };
 }
 
 export function buildGrid(sheet: WorkSheet): SheetGrid {
@@ -158,7 +197,7 @@ export function buildGrid(sheet: WorkSheet): SheetGrid {
     cells: visibleCols.map((c) => {
       const key = `${r}:${c}`;
       if (covered.has(key)) return null;
-      const cell = toGridCell(data[r]?.[c]);
+      const cell = toGridCell(utils.encode_cell({ r, c }), data[r]?.[c]);
       const span = spans.get(key);
       if (span !== undefined) {
         cell.rowSpan = span.rowSpan;
