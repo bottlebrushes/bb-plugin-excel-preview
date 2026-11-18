@@ -12,7 +12,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
-import { FileTooLargeError, fileRequest, loadFileBytes } from "./load";
+import { FileTooLargeError, fileUrl, loadFileBytes } from "./load";
 import { OPENER_ID, SPREADSHEET_EXTENSIONS, seedDefaultOpener } from "./default-opener";
 import { buildGrid, parseWorkbook, visibleSheets } from "./sheet";
 import type { CellKind, SheetGrid, SheetTab } from "./sheet";
@@ -377,17 +377,17 @@ function WorkbookView({ workbook, tabs }: { workbook: WorkBook; tabs: SheetTab[]
 function SpreadsheetViewer({ path, source, Original }: PluginFileOpenerProps) {
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const request = useMemo(
-    () => fileRequest(path, source),
+  const url = useMemo(
+    () => fileUrl(path, source),
     // `source` is a fresh object per render; its fields are the identity.
     [path, source.kind, source.threadId, source.environmentId, source.projectId, source.experimental_hostId],
   );
 
   useEffect(() => {
-    if (request === null) return;
+    if (url === null) return;
     const controller = new AbortController();
     setState({ status: "loading" });
-    loadFileBytes(request, controller.signal)
+    loadFileBytes(url, controller.signal)
       .then((bytes) => {
         if (controller.signal.aborted) return;
         const workbook = parseWorkbook(bytes);
@@ -402,9 +402,9 @@ function SpreadsheetViewer({ path, source, Original }: PluginFileOpenerProps) {
         });
       });
     return () => controller.abort();
-  }, [request, attempt]);
+  }, [url, attempt]);
 
-  if (request === null) return <Original />;
+  if (url === null) return <Original />;
 
   if (state.status === "loading") {
     return (
