@@ -6,7 +6,7 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "lib": [
-      "ES2022",
+      "ES2024",
       "DOM"
     ],
     "types": [
@@ -22,8 +22,9 @@
   },
   "include": [
     "server.ts",
+    "libreoffice.ts",
+    "text-modules.d.ts",
     "app.tsx",
-    "load.ts",
     "sheet.ts",
     "default-opener.ts",
     "components",

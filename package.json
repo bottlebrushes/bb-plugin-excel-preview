@@ -1,7 +1,7 @@
 {
   "name": "bb-plugin-excel-preview",
-  "version": "0.2.1",
-  "description": "Read-only, theme-matched spreadsheet viewer for BB's file panel (xlsx, xlsm, xlsb, xls, ods).",
+  "version": "0.3.0",
+  "description": "Theme-matched spreadsheet viewer for BB's file panel (xlsx, xlsm, xlsb, xls, ods), with formula results and cell edits through LibreOffice.",
   "type": "module",
   "license": "MIT",
   "author": "bottlebrushes",
@@ -18,12 +18,12 @@
     "viewer"
   ],
   "engines": {
-    "bb": ">=0.43",
-    "bbPluginSdk": ">=0.5.9"
+    "bb": ">=0.49",
+    "bbPluginSdk": ">=0.6.132"
   },
   "bb": {
     "name": "Excel Preview",
-    "description": "View Excel and OpenDocument spreadsheets in BB's file panel as a read-only grid in your theme's colors.",
+    "description": "View Excel and OpenDocument spreadsheets in BB's file panel in your theme's colors. With LibreOffice installed, see formula results and edit cells.",
     "branding": {
       "icon": "./assets/icon.svg"
     },
@@ -36,7 +36,7 @@
     "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "0.5.9",
+    "@get-bb/plugin-sdk": "0.6.132",
     "@radix-ui/react-context-menu": "^2.4.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
@@ -44,7 +44,8 @@
     "@types/react-dom": "^19.0.0",
     "clsx": "^2.1.1",
     "hono": "^4.13.18",
-    "tailwind-merge": "^3.4.0",
-    "typescript": "^5.7.0"
+    "tailwind-merge": "^3.7.0",
+    "typescript": "^5.7.0",
+    "zod": "^4.6.7"
   }
 }
